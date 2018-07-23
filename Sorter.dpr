@@ -65,10 +65,12 @@ begin
             MemoryAvailable := n
           else
             writeln('Incorrect -L option value. Using ', MemoryAvailable, ' by default');
-        end
-
+        end;
       end;
     end;
+
+    if Debug then
+      TrackMemoryUsage := false;
   end;
 end;
 
@@ -84,9 +86,9 @@ begin
     writeln('Usage: sorter InFile [OutFile] [Options]');
     writeln('Options:');
     writeln('  -D - debug (shows log and saves all the temporary files, be careful!)');
-    writeln('  -M - track memory usage (slightly reduce perfomance)');
-    writeln('  -Tn - use n worker threads (default 3)');
-    writeln('  -Ln - limit memory usage to n kilobytes (default 1024)');
+    writeln('  -M - track memory usage (doesn''t work with -D');
+    writeln('  -Tn - use n worker threads (default ', MaxWorkerThreadCount, ')');
+    writeln('  -Ln - limit memory usage to n kilobytes (default ', MemoryAvailable, ')');
   end
   else
   begin
@@ -103,7 +105,11 @@ begin
     if TrackMemoryUsage then
       SetDebugMemoryManager;
 
-    writeln('Sorting ', InFile, 'using ', MemoryAvailable, ' Kb of memory');  
+    write('Sorting ', InFile);
+    if TrackMemoryUsage then
+      writeln(' using ', MemoryAvailable, ' Kb of memory')
+    else
+      writeln;
 
     InitSort;
 
@@ -120,14 +126,14 @@ begin
     OutFileSize := FileSize(OutFile);
 
     writeln(Format('Done in %.3f seconds                                                                         ', [(EndTime - StartTime) / Freq]));
-    writeln('Input file size : ', InFileSize, ' bytes');
-    writeln('Output file size: ', OutFileSize, ' bytes');
 
     if TrackMemoryUsage then
     begin
-      RestoreMemoryManager;
-
+      writeln('Input file size : ', InFileSize, ' bytes');
+      writeln('Output file size: ', OutFileSize, ' bytes');
       writeln('Max heap usage: sorting ', GetMaxSortMemoryUsage div 1024, ' KBytes, merging ', GetMaxMergeMemoryUsage div 1024, ' KBytes');
+
+      RestoreMemoryManager;
     end;
   end;
 end.

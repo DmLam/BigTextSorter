@@ -2,7 +2,7 @@ unit UnitSplitter;
 
 interface
 uses
-  SysUtils, Classes,
+  Windows, SysUtils, Classes,
   Common, UnitBlockList, UnitBlockSorter, UnitThreadManager;
 
 function SplitFileIntoSortedBlocks(const FileName: string; const ThreadManager: TThreadManager; const OnProgress: TProgressProc = nil): integer;

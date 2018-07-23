@@ -20,7 +20,7 @@ const
 var
   Debug: boolean = false;
   TrackMemoryUsage: boolean = false;
-  MaxWorkerThreadCount: integer = 3;
+  MaxWorkerThreadCount: integer = 1;
   MemoryAvailable: integer = 1024;
   SortBufferSize: integer = SORT_BLOCK_SIZE;
   MergeBufferSize: integer = SORT_BLOCK_SIZE;
