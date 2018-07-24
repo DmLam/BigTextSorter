@@ -2,6 +2,17 @@ program Sorter;
 
 {$APPTYPE CONSOLE}
 
+// »спользуетс€ сортировка сли€нием.
+// »де€ стандартна€ - разбиваем исходный файл на блоки примерно равной длины по <= SORT_BLOCK_SIZE байт
+//  аждый блок сортируем в пам€ти и сохран€ем во временный файл
+// ƒальше сливаем блоки с сортировкой
+//
+// ћожно уменьшить количество используемого дискового пространства если запускать сли€ние
+// не дожида€сь окончани€ процесса разбиени€, но там будет больше проблем с управлением
+// потоками, поэтому пока так
+//
+// ”величение количества рабочих потоков вызывает уменьшение скорости из-за конкуренции за диск между потоками
+
 uses
   Windows,
   SysUtils,
@@ -86,7 +97,7 @@ begin
     writeln('Usage: sorter InFile [OutFile] [Options]');
     writeln('Options:');
     writeln('  -D - debug (shows log and saves all the temporary files, be careful!)');
-    writeln('  -M - track memory usage (doesn''t work with -D');
+    writeln('  -M - track memory usage (doesn''t work with -D)');
     writeln('  -Tn - use n worker threads (default ', MaxWorkerThreadCount, ')');
     writeln('  -Ln - limit memory usage to n kilobytes (default ', MemoryAvailable, ')');
   end

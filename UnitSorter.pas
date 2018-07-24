@@ -5,16 +5,6 @@ uses
   Windows, SysUtils, Classes,
   Common, UnitBlockSorter, UnitMerger, UnitMemoryManager, UnitThreadManager;
 
-// ќсновна€ процедура сортировки.
-// »спользуетс€ сортировка сли€нием.
-// »де€ стандартна€ - разбиваем исходный файл на блоки примерно равной длины по <= SORT_BLOCK_SIZE байт
-//  аждый блок сортируем в пам€ти и сохран€ем во временный файл
-// ƒальше сливаем блоки с сортировкой
-//
-// ћожно уменьшить количество используемого дискового пространства если запускать сли€ние
-// не дожида€сь окончани€ процесса разбиени€, но там будет больше проблем с управлением
-// потоками, поэтому пока так
-
 procedure InitSort;
 procedure SortData(const InFileName, OutFileName: string);
 function GetMaxSortMemoryUsage: integer;
@@ -60,7 +50,9 @@ begin
   if NewPercent > CurPercent then
   begin
     CurPercent := NewPercent;
-    SetConsoleCursorPos(ConsoleX, ConsoleY);
+    if not Debug then
+      SetConsoleCursorPos(ConsoleX, ConsoleY);
+
     write(Format('%d.%.3d%%', [CurPercent div 1000, CurPercent mod 1000]));
     if TrackMemoryUsage then
     begin
@@ -68,17 +60,18 @@ begin
       if ThreadRunning > MaxThreadRunning then
         MaxThreadRunning := ThreadRunning;
 
-      write(Format(' (%5d KB of heap is in use, %5d KB max, %2d threads running, %2d max)',
-        [GetMemoryUsage div 1024,
-         Max(MaxSortMemoryUsage, GetMaxMemoryUsage) div 1024,
-         ThreadRunning,
-         MaxThreadRunning]));
+      if not Debug then
+        write(Format(' (%5d KB of heap is in use, %5d KB max, %2d threads running, %2d max)',
+          [GetMemoryUsage div 1024,
+           Max(MaxSortMemoryUsage, GetMaxMemoryUsage) div 1024,
+           ThreadRunning,
+           MaxThreadRunning]));
     end;
   end;
 end;
 
 const
-  WRITE_BUFFER_RATIO = 3;   // буфер на запись при сли€нии в WRITE_BUFFER_RATIO раз больше буфера сли€ни€
+  WRITE_BUFFER_RATIO = 3;   // буфер на запись при сли€нии во WRITE_BUFFER_RATIO раз больше буфера сли€ни€
 
 procedure InitSort;
 var
