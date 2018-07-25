@@ -3,9 +3,9 @@ unit UnitSplitter;
 interface
 uses
   Windows, SysUtils, Classes,
-  Common, UnitBlockList, UnitBlockSorter, UnitThreadManager;
+  Common, UnitBlockList, UnitBlockSorter;
 
-function SplitFileIntoSortedBlocks(const FileName: string; const ThreadManager: TThreadManager; const OnProgress: TProgressProc = nil): integer;
+function SplitFileIntoSortedBlocks(const FileName: string; const OnProgress: TProgressProc = nil): integer;
 
 implementation
 
@@ -22,7 +22,7 @@ end;
 
 { TSplitter }
 
-function SplitFileIntoSortedBlocks(const FileName: string; const ThreadManager: TThreadManager; const OnProgress: TProgressProc = nil): integer;
+function SplitFileIntoSortedBlocks(const FileName: string; const OnProgress: TProgressProc = nil): integer;
 var
   FS: TStream;
   Buf, BufStart, BufEnd, LastChar: PAnsiChar;
@@ -30,7 +30,7 @@ var
   BlockRestSize: integer;
   Block: PAnsiChar;
   BlockIndex: integer;
-  BlockSorter: TBlockSorterThread;
+  BlockSorter: TBlockSorter;
   Error: boolean;
 begin
   Result := 0;
@@ -89,9 +89,9 @@ begin
           // Отсортируем и сохраним в файл
           Inc(Result);
           BlockIndex := Blocks.NextBlockNumber;
-          BlockSorter := TBlockSorterThread.Create(Block, BlockSize, BlockIndex);
+          BlockSorter := TBlockSorter.Create(Block, BlockSize, BlockIndex);
           BlockSorter.ResultFileName := Blocks.Add(BlockSorter);
-          ThreadManager.Run(BlockSorter);
+          BlockSorter.Execute;
           if Assigned(OnProgress) then
             OnProgress(FS.Position / FS.Size / 2);
         end;
@@ -99,7 +99,6 @@ begin
 
       if Error then
       begin
-        ThreadManager.WaitAllThreads;
         ClearFiles;
         Result := 0;
       end;

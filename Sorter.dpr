@@ -18,7 +18,7 @@ uses
   SysUtils,
   UnitSorter in 'UnitSorter.pas',
   UnitBlockSorter in 'UnitBlockSorter.pas',
-  UnitThreadManager in 'UnitThreadManager.pas',
+  UnitWorker in 'UnitWorker.pas',
   UnitSplitter in 'UnitSplitter.pas',
   UnitMerger in 'UnitMerger.pas',
   UnitBlockMerger in 'UnitBlockMerger.pas',

@@ -3,7 +3,7 @@ unit UnitBlockList;
 interface
 uses
   Windows, SysUtils, Classes, SyncObjs,
-  UnitThreadManager;
+  UnitWorker;
 
 type
   TBlockList = class
@@ -22,7 +22,7 @@ type
     procedure UnLock;
 
     function NextBlockNumber: integer;
-    function Add(const Thread: TProtoThread): string;
+    function Add(const Thread: TWorker): string;
     procedure Delete;
     property BlockNumber[Index: integer]: integer
       read GetBlockNumber;
@@ -37,7 +37,7 @@ implementation
 
 { TBlockList }
 
-function TBlockList.Add(const Thread: TProtoThread): string;
+function TBlockList.Add(const Thread: TWorker): string;
 begin
   Result := Format(FFileNameTemplate, [Thread.BlockIndex]);
 

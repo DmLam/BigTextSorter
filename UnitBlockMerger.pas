@@ -3,10 +3,10 @@ unit UnitBlockMerger;
 interface
 uses
   Windows, SysUtils, Classes,
-  Common, UnitThreadManager;
+  Common, UnitWorker;
 
 type
-  TBlockMergerThread = class(TProtoThread)
+  TBlockMerger = class(TWorker)
   private
     FFileName1, FFileName2: string;
     type
@@ -44,13 +44,13 @@ uses UnitBufferedFileStream;
 
 { TBlockMerger.TBuffer }
 
-procedure TBlockMergerThread.TBuffer.CheckPtr(var Ptr: PAnsiChar);
+procedure TBlockMerger.TBuffer.CheckPtr(var Ptr: PAnsiChar);
 begin
   if Ptr > FBufferEnd then
     Ptr := FBufferEnd;
 end;
 
-procedure TBlockMergerThread.TBuffer.CopyTo(const Destination: TStream);
+procedure TBlockMerger.TBuffer.CopyTo(const Destination: TStream);
 begin
   // записываем остаток буфера и остаток файла в поток назначения
   Destination.WriteBuffer(FCurPtr^, FBuffer + BytesInBuffer - FCurPtr);
@@ -61,7 +61,7 @@ begin
   FCurPtr := FBuffer;
 end;
 
-constructor TBlockMergerThread.TBuffer.Create(const FileName: string);
+constructor TBlockMerger.TBuffer.Create(const FileName: string);
 begin
   FFileName := FileName;
   try
@@ -76,7 +76,7 @@ begin
   ReadBlockFromFile;
 end;
 
-procedure TBlockMergerThread.TBuffer.Destroy;
+procedure TBlockMerger.TBuffer.Destroy;
 begin
   FreeMem(FBuffer);
   FStream.Free;
@@ -85,12 +85,12 @@ begin
     DeleteFile(FFileName);
 end;
 
-function TBlockMergerThread.TBuffer.IsEmpty: boolean;
+function TBlockMerger.TBuffer.IsEmpty: boolean;
 begin
   Result := (FCurPtr >= FBufferEnd) and (FStream.Position = FStream.Size);
 end;
 
-procedure TBlockMergerThread.TBuffer.ReadBlockFromFile;
+procedure TBlockMerger.TBuffer.ReadBlockFromFile;
 var
   BufRestSize: integer;
   BufStart: PAnsiChar;
@@ -132,7 +132,7 @@ begin
     FBufferEnd := FBuffer + BufRestSize;
 end;
 
-procedure TBlockMergerThread.TBuffer.SetCurPtr(const Value: PAnsiChar);
+procedure TBlockMerger.TBuffer.SetCurPtr(const Value: PAnsiChar);
 begin
   if Value >= FBufferEnd then
     ReadBlockFromFile
@@ -142,7 +142,7 @@ end;
 
 { TBlockMerger }
 
-constructor TBlockMergerThread.Create(const BlockIndex: integer; const FileName1, FileName2, ResultFileName: string);
+constructor TBlockMerger.Create(const BlockIndex: integer; const FileName1, FileName2, ResultFileName: string);
 begin
   inherited Create(BlockIndex);
 
@@ -150,7 +150,7 @@ begin
   FFileName2 := FileName2;
 end;
 
-procedure TBlockMergerThread.Execute;
+procedure TBlockMerger.Execute;
 var
   RF: TStream;
   Buffer1, Buffer2: TBuffer;

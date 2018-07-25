@@ -26,10 +26,14 @@ var
   MergeBufferSize: integer = SORT_BLOCK_SIZE;
   MergeWriteBufferSize: integer = SORT_BLOCK_SIZE;
 
-procedure Log(const s: string);
-function FindLastCRLF(const BufferStart, BufferEnd: PAnsiChar): PAnsiChar;
+// -1 ==> S1 < S2
+// 0 ==> S1 = S2
+// 1 ==> S1 > S2
 function CompareStrings(const S1, S2: PAnsiChar; var S1End, S2End: PAnsiChar): integer; overload;
 function CompareStrings(S1, S2: PAnsiChar): integer; overload;
+
+procedure Log(const s: string);
+function FindLastCRLF(const BufferStart, BufferEnd: PAnsiChar): PAnsiChar;
 function FileSize(const FileName: string): Int64;
 procedure GetConsoleCursorPos(var x, y: integer);
 procedure SetConsoleCursorPos(const x, y: integer);
@@ -65,9 +69,6 @@ begin
     Result := nil;
 end;
 
-// -1 ==> S1 < S2
-// 0 ==> S1 = S2
-// 1 ==> S1 > S2
 function CompareStrings(const S1, S2: PAnsiChar; var S1End, S2End: PAnsiChar): integer;
 var
   CurLen: integer;

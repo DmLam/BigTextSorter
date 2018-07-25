@@ -3,7 +3,7 @@ unit UnitSorter;
 interface
 uses
   Windows, SysUtils, Classes,
-  Common, UnitBlockSorter, UnitMerger, UnitMemoryManager, UnitThreadManager;
+  Common, UnitBlockSorter, UnitMerger, UnitMemoryManager;
 
 procedure InitSort;
 procedure SortData(const InFileName, OutFileName: string);
@@ -40,7 +40,7 @@ end;
 
 procedure OnProgress(const Percent: Double);
 var
-  ThreadRunning, NewPercent: integer;
+  NewPercent: integer;
 begin
   if Debug then
     Exit;
@@ -56,16 +56,10 @@ begin
     write(Format('%d.%.3d%%', [CurPercent div 1000, CurPercent mod 1000]));
     if TrackMemoryUsage then
     begin
-      ThreadRunning := ThreadManager.Running;
-      if ThreadRunning > MaxThreadRunning then
-        MaxThreadRunning := ThreadRunning;
-
       if not Debug then
-        write(Format(' (%5d KB of heap is in use, %5d KB max, %2d threads running, %2d max)',
+        write(Format(' (%5d KB of heap is in use, %5d KB max)',
           [GetMemoryUsage div 1024,
-           Max(MaxSortMemoryUsage, GetMaxMemoryUsage) div 1024,
-           ThreadRunning,
-           MaxThreadRunning]));
+           Max(MaxSortMemoryUsage, GetMaxMemoryUsage) div 1024]));
     end;
   end;
 end;
@@ -82,7 +76,7 @@ begin
   // при больших размерах файла он имеет значение
   MaxMem := MemoryAvailable * 1024;
 
-  SortBufferSize := MaxMem div (3 + 2 * MaxWorkerThreadCount);
+  SortBufferSize := MaxMem div 4;
   MergeBufferSize := MaxMem div (1 + (2 + WRITE_BUFFER_RATIO) * MaxWorkerThreadCount);
   MergeWriteBufferSize := MergeBufferSize * WRITE_BUFFER_RATIO;
 end;
@@ -94,38 +88,32 @@ var
 begin
   Blocks := TBlockList.Create(InFileName);   // список номеров созданных в процессе работы временных файлов
   try
-    ThreadManager := TThreadManager.Create(MaxWorkerThreadCount);
+    GetConsoleCursorPos(ConsoleX, ConsoleY);
+    ShowConsoleCursor(false);
     try
-      GetConsoleCursorPos(ConsoleX, ConsoleY);
-      ShowConsoleCursor(false);
-      try
-        CurPercent := 0;
+      CurPercent := 0;
 
-        BlockCount := SplitFileIntoSortedBlocks(InFileName, ThreadManager, OnProgress);
-        MaxSortMemoryUsage := GetMaxMemoryUsage;
-        ResetMaxMemoryUsage;
-        if BlockCount > 0 then // BlockCount = 0 ==> ошибка при разбиении (н-р, не смогли открыть входной файл)
-        begin
-          LastBlockFileName := MergeBlocks(OnProgress);
-          MaxMergeMemoryUsage := GetMaxMemoryUsage;
-          ThreadManager.WaitAllThreads;
+      BlockCount := SplitFileIntoSortedBlocks(InFileName, OnProgress);
+      MaxSortMemoryUsage := GetMaxMemoryUsage;
+      ResetMaxMemoryUsage;
+      if BlockCount > 0 then // BlockCount = 0 ==> ошибка при разбиении (н-р, не смогли открыть входной файл)
+      begin
+        LastBlockFileName := MergeBlocks(OnProgress);
+        MaxMergeMemoryUsage := GetMaxMemoryUsage;
 
-          if FileExists(OutFileName) then
-            DeleteFile(OutFileName);
-          if Debug then
-            CopyFile(PChar(LastBlockFileName), PChar(OutFileName), false)
-          else
-            RenameFile(LastBlockFileName, OutFileName);
-        end;
-
-        SetConsoleCursorPos(ConsoleX, ConsoleY);
-        write(StringOfChar(' ', 50));
-        SetConsoleCursorPos(ConsoleX, ConsoleY);
-      finally
-        ShowConsoleCursor(true);
+        if FileExists(OutFileName) then
+          DeleteFile(OutFileName);
+        if Debug then
+          CopyFile(PChar(LastBlockFileName), PChar(OutFileName), false)
+        else
+          RenameFile(LastBlockFileName, OutFileName);
       end;
+
+      SetConsoleCursorPos(ConsoleX, ConsoleY);
+      write(StringOfChar(' ', 50));
+      SetConsoleCursorPos(ConsoleX, ConsoleY);
     finally
-      ThreadManager.Free;
+      ShowConsoleCursor(true);
     end;
   finally
     Blocks.Free;

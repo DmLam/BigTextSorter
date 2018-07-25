@@ -3,22 +3,14 @@ unit UnitBlockSorter;
 interface
 uses
   SysUtils, Classes,
-  Common, UnitThreadManager, UnitBufferedFileStream;
+  Common, UnitWorker, UnitBufferedFileStream;
 
 type
-  TBlockSorterThread = class(TProtoThread)
+  TBlockSorter = class(TWorker)
   private
-  type
-    TIndexArray = array[0..0] of integer; 
-    PIndexArray = ^TIndexArray;
-
-  var
     FData: PAnsiChar;
     FDataSize: integer;
-    FIndexes: PIndexArray; // массив смещений строк от начала буфера. храним не в виде указателей, а в виде смещений, т.к. при необходимости 
-                           // скомпилировать под x64 массив с указателями будет занимать в два раза больше памяти, которая у нас ограничена
 
-    procedure QuickSort(L, R: Integer);
   public
     constructor Create(const Data: PAnsiChar; const DataSize: integer; const BlockIndex: integer);
 
@@ -27,7 +19,67 @@ type
 
 implementation
 
-procedure TBlockSorterThread.QuickSort(L, R: Integer);
+type
+  TIndexArray = array[0..0] of integer;
+  PIndexArray = ^TIndexArray;
+
+
+type
+  TPieceSorter = class(TThread)
+  private
+    FData, FDataEnd: PAnsiChar;
+    FDataSize: integer;
+    FIndexes: PIndexArray; // массив смещений строк от начала буфера. храним не в виде указателей, а в виде смещений, т.к. при необходимости
+                           // скомпилировать под x64 массив с указателями будет занимать в два раза больше памяти, которая у нас ограничена
+    FIndexesSize: integer;
+    FLineCount: integer;
+    FCurLineIndex: integer;
+
+    procedure QuickSort(L, R: Integer);
+    function GetCurLine: PAnsiChar;
+
+  public
+    constructor Create(const Data: PAnsiChar; const DataSize: integer);
+    destructor Destroy; override;
+
+    procedure Execute; override;
+    procedure SaveCurLine(const Stream: TStream);
+
+    property LineCount: integer
+      read FLineCount;
+    property CurLine: PAnsiChar
+      read GetCurLine;   
+    property CurLineIndex: integer
+      read FCurLineIndex;
+  end;
+
+{ TBlockSorter }
+
+constructor TPieceSorter.Create(const Data: PAnsiChar; const DataSize: integer);
+begin
+  inherited Create(true);  // create suspended
+
+  FData := Data;
+  FDataSize := DataSize;
+  FCurLineIndex := 0;
+end;
+
+destructor TPieceSorter.Destroy;
+begin
+  FreeMem(FIndexes);
+
+  inherited;
+end;
+
+function TPieceSorter.GetCurLine: PAnsiChar;
+begin
+  Result := nil;
+
+  if (FCurLineIndex >= 0) and (FCurLineIndex < FLineCount) then
+    Result := FData + FIndexes[FCurLineIndex];
+end;
+
+procedure TPieceSorter.QuickSort(L, R: Integer);
 var
   I, J, P, Save: Integer;
 begin
@@ -59,9 +111,63 @@ begin
   until I >= R;
 end;
 
-{ TStreamSorter }
+procedure TPieceSorter.SaveCurLine(const Stream: TStream);
+var
+  Ptr, LineStart: PAnsiChar;
+begin
+  Ptr := FData + FIndexes[FCurLineIndex];
+  LineStart := Ptr;
+  while (Ptr < FDataEnd) and (PWord(Ptr)^ <> CRLF) do
+    Inc(Ptr);
+  if Ptr < FDataEnd then
+    Inc(Ptr, 2);  // CRLF
+  Stream.WriteBuffer(LineStart^, Ptr - LineStart);
+  Inc(FCurLineIndex);
+end;
 
-constructor TBlockSorterThread.Create(const Data: PAnsiChar; const DataSize: integer; const BlockIndex: integer);
+procedure TPieceSorter.Execute;
+var
+  IndexBlockSize: integer;
+  Ptr, LineStart: PAnsiChar;
+begin
+  // приращение размера массива индексов выберем как среднее количество строк, помещающееся в буфер
+  IndexBlockSize := FDataSize div (MAX_LINE_LENGTH div 2) * SizeOf(Integer);
+  if IndexBlockSize = 0 then
+    IndexBlockSize := 100;
+  FIndexesSize := IndexBlockSize;
+  GetMem(FIndexes, FIndexesSize);
+
+  // подготовим массив FIndexes со смещениями каждой строки от начала буфера
+  // Поскольку количество строк заранее не известно, то память под массив выделяем порциями по IndexBlockSize байт
+  // Можно еще немного ускорить дальнейшийпроцесс сохранения строк в файл если на этом этапе хранить не только
+  // начала строк, но и их размеры
+  FDataEnd := FData + FDataSize;
+  Ptr := FData;
+  FLineCount := 0;
+  while Ptr < FDataEnd do
+  begin
+    LineStart := Ptr;
+    while (Ptr < FDataEnd) and (PWord(Ptr)^ <> CRLF) do
+      Inc(Ptr);
+    if Ptr < FDataEnd then
+    begin
+      if FLineCount * SizeOf(integer) >= FIndexesSize then
+      begin
+        Inc(FIndexesSize, IndexBlockSize);
+        ReallocMem(FIndexes, FIndexesSize);
+      end;
+      FIndexes[FLineCount] := LineStart - FData;
+      Inc(FLineCount);
+
+      Inc(Ptr, 2);
+    end;
+  end;
+
+  // Сортируем строки обычным QuickSort-ом. Реально сортируются смещения в массиве
+  QuickSort(0, FLineCount - 1);
+end;
+
+constructor TBlockSorter.Create(const Data: PAnsiChar; const DataSize: integer; const BlockIndex: integer);
 begin
   inherited Create(BlockIndex);
 
@@ -69,77 +175,81 @@ begin
   FDataSize := DataSize;
 end;
 
-procedure TBlockSorterThread.Execute;
+procedure TBlockSorter.Execute;
 var
-  LineStart, Ptr, DataEnd: PAnsiChar;
-  LineCount: integer;
-  IndexesSize: integer; // текущий размер массива смещений строк
+  PieceSorters: array of TPieceSorter;
+  PieceSize: integer;
+  PiecePtr, PieceEnd: PAnsiChar;
   FS: TStream;
   i: integer;
-  IndexBlockSize: integer;
+  MinLinePieceIndex: Integer;
 begin
-  IndexesSize := 0;
-  IndexBlockSize := MergeBufferSize div (MAX_LINE_LENGTH div 2) * SizeOf(Integer);  // приращение размера массива индексов выберем как среднее количество строк, помещающееся в буфер
-
-  FIndexes := nil;
   try
-    try
-      // подготовим массив FIndexes со смещениями каждой строки от начала буфера
-      // Поскольку количество строк заранее не известно, то память под массив выделяем порциями по INDEX_BLOCK_SIZE байт
-      DataEnd := FData + FDataSize;
-      Ptr := FData;
-      LineCount := 0;
-      while Ptr < DataEnd do
+    // Разобьем блок на кусочки по числу рабочих потоков. Отсортируем каждый в своем потоке и сольем, записывая сразу в файл
+    PieceSize := FDataSize div MaxWorkerThreadCount;
+    PiecePtr := FData;
+    PieceEnd := PiecePtr;
+    SetLength(PieceSorters, MaxWorkerThreadCount);
+    for i := 0 to MaxWorkerThreadCount  - 2 do
+    begin
+      PieceEnd := FindLastCRLF(PiecePtr, PiecePtr + PieceSize);
+      if PieceEnd = nil then
       begin
-        LineStart := Ptr;
-        while (Ptr < DataEnd) and (PWord(Ptr)^ <> CRLF) do
-          Inc(Ptr);
-        if Ptr < DataEnd then
-        begin
-          if LineCount * SizeOf(integer) >= IndexesSize then
-          begin
-            Inc(IndexesSize, IndexBlockSize);
-            ReallocMem(FIndexes, IndexesSize);
-          end;
-          FIndexes[LineCount] := LineStart - FData;
-          Inc(LineCount);
-
-          Inc(Ptr, 2);
-        end;
-      end;
-
-      // Сортируем строки обычным QuickSort-ом. Реально сортируются смещения в массиве
-      QuickSort(0, LineCount - 1);
-
-      FS := nil;  // чтоб компилятор не ругался на неинициализированную переменную
-      try
-        FS := TWriteCachedFileStream.Create(ResultFileName, FDataSize, 0, false);
-      except
-        writeln('Cannot create file ', ResultFileName);
-
+        writeln('Line too long');
         Halt;
-      end;
+      end
+      else
+        Inc(PieceEnd, 2); // CRLF
+      PieceSorters[i] := TPieceSorter.Create(PiecePtr, PieceEnd - PiecePtr);
+      PiecePtr := PieceEnd;
+    end;
+    // Последний кусок - все что осталось
+    PieceSorters[MaxWorkerThreadCount - 1] := TPieceSorter.Create(PieceEnd, FData + FDataSize - PieceEnd);
 
-      // сохраняем отсортированные строки в файл
-      try
-        for i := 0 to LineCount - 1 do
+    for i := 0 to MaxWorkerThreadCount - 1 do
+      PieceSorters[i].Resume;
+
+    for i := 0 to MaxWorkerThreadCount - 1 do
+      PieceSorters[i].WaitFor;
+
+    FS := nil;  // чтоб компилятор не ругался на неинициализированную переменную
+    try
+      FS := TWriteCachedFileStream.Create(ResultFileName, FDataSize, 0, false);
+    except
+      writeln('Cannot create file ', ResultFileName);
+
+      Halt;
+    end;
+
+    // сохраняем отсортированные куски в файл, сливая их с сортировкой
+    try
+      repeat
+        // выбираем кусок у с минимальной строкой
+        MinLinePieceIndex := -1;
+        for i := 0 to MaxWorkerThreadCount - 1 do
         begin
-          Ptr := FData + FIndexes[i];
-          LineStart := Ptr;
-          while (Ptr < DataEnd) and (PWord(Ptr)^ <> CRLF) do
-            Inc(Ptr);
-          if Ptr < DataEnd then
-            Inc(Ptr, 2);  // CRLF
-          FS.WriteBuffer(LineStart^, Ptr - LineStart);
+          if PieceSorters[i].CurLine <> nil then
+          begin
+            if MinLinePieceIndex = -1 then
+              MinLinePieceIndex := i
+            else
+              if CompareStrings(PieceSorters[MinLinePieceIndex].CurLine, PieceSorters[i].CurLine) > 0  then
+                MinLinePieceIndex := i;
+          end;
         end;
-      finally
-        FS.Free;
-      end;
+
+        if MinLinePieceIndex <> -1 then
+          PieceSorters[MinLinePieceIndex].SaveCurLine(FS);
+      until MinLinePieceIndex = -1;
+
+      for i := 0 to MaxWorkerThreadCount - 1 do
+        PieceSorters[i].Free;
+
     finally
-      FreeMem(FData);
+      FS.Free;
     end;
   finally
-    FreeMem(FIndexes);
+    FreeMem(FData);
   end;
 
   inherited;
