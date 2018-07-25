@@ -76,7 +76,7 @@ begin
   // при больших размерах файла он имеет значение
   MaxMem := MemoryAvailable * 1024;
 
-  SortBufferSize := MaxMem div 4;
+  SortBufferSize := MaxMem div 3;
   MergeBufferSize := MaxMem div (1 + (2 + WRITE_BUFFER_RATIO) * MaxWorkerThreadCount);
   MergeWriteBufferSize := MergeBufferSize * WRITE_BUFFER_RATIO;
 end;

@@ -183,6 +183,8 @@ var
   FS: TStream;
   i: integer;
   MinLinePieceIndex: Integer;
+  CurrentPiecesCount: integer;
+  TempPS: TPieceSorter;
 begin
   try
     // Разобьем блок на кусочки по числу рабочих потоков. Отсортируем каждый в своем потоке и сольем, записывая сразу в файл
@@ -223,24 +225,37 @@ begin
 
     // сохраняем отсортированные куски в файл, сливая их с сортировкой
     try
-      repeat
+      CurrentPiecesCount := MaxWorkerThreadCount;  // количество непустых еще кусков
+      while CurrentPiecesCount > 1 do
+      begin
         // выбираем кусок у с минимальной строкой
         MinLinePieceIndex := -1;
-        for i := 0 to MaxWorkerThreadCount - 1 do
+        for i := 0 to CurrentPiecesCount - 1 do
         begin
-          if PieceSorters[i].CurLine <> nil then
-          begin
-            if MinLinePieceIndex = -1 then
-              MinLinePieceIndex := i
-            else
-              if CompareStrings(PieceSorters[MinLinePieceIndex].CurLine, PieceSorters[i].CurLine) > 0  then
-                MinLinePieceIndex := i;
-          end;
+          if MinLinePieceIndex = -1 then
+            MinLinePieceIndex := i
+          else
+            if CompareStrings(PieceSorters[MinLinePieceIndex].CurLine, PieceSorters[i].CurLine) > 0  then
+              MinLinePieceIndex := i;
         end;
 
         if MinLinePieceIndex <> -1 then
+        begin
           PieceSorters[MinLinePieceIndex].SaveCurLine(FS);
-      until MinLinePieceIndex = -1;
+          if PieceSorters[MinLinePieceIndex].CurLine = nil then
+          begin
+            // кусок закончился - переместим его в конец списка и не будем больше использовать
+            TempPS := PieceSorters[CurrentPiecesCount - 1];
+            PieceSorters[CurrentPiecesCount - 1] := PieceSorters[MinLinePieceIndex];
+            PieceSorters[MinLinePieceIndex] := TempPS;
+            Dec(CurrentPiecesCount);
+          end;
+        end;
+      end;
+
+      // остался последний кусок в списке - запишем все его содержимое прямо в файл, т.к. больше сливать нечего
+      while PieceSorters[0].CurLine <> nil do
+        PieceSorters[0].SaveCurLine(FS);
 
       for i := 0 to MaxWorkerThreadCount - 1 do
         PieceSorters[i].Free;

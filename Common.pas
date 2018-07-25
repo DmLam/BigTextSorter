@@ -78,22 +78,32 @@ begin
   S1End := S1;
   S2End := S2;
 
-  while (Result = 0) and (CurLen < STRING_COMPARE_LENGTH) do
+  while CurLen < STRING_COMPARE_LENGTH do
   begin
     if PWord(S1End)^ = CRLF then
     begin
       if PWord(S2End)^ <> CRLF then
         Result := -1;
+      Break;
     end
     else
     if PWord(S2End)^ = CRLF then
-      Result := 1
+    begin
+      Result := 1;
+      Break;
+    end
     else
     if S1End^ < S2End^ then
-      Result := -1
+    begin
+      Result := -1;
+      Break;
+    end
     else
     if S1End^ > S2End^ then
-      Result := 1
+    begin
+      Result := 1;
+      Break;
+    end
     else
     begin
       Inc(S1End);
@@ -119,22 +129,32 @@ begin
   Result := 0;
   CurLen := 0;
 
-  while (Result = 0) and (CurLen < STRING_COMPARE_LENGTH) do
+  while CurLen < STRING_COMPARE_LENGTH do
   begin
     if PWord(S1)^ = CRLF then
     begin
       if PWord(S2)^ <> CRLF then
         Result := -1;
+      Break;
     end
     else
     if PWord(S2)^ = CRLF then
-      Result := 1
+    begin
+      Result := 1;
+      Break;
+    end
     else
     if S1^ < S2^ then
-      Result := -1
+    begin
+      Result := -1;
+      Break;
+    end
     else
     if S1^ > S2^ then
-      Result := 1
+    begin
+      Result := 1;
+      Break;
+    end
     else
     begin
       Inc(S1);

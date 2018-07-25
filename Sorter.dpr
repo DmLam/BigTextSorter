@@ -130,7 +130,17 @@ begin
     QueryPerformanceFrequency(Freq);
     QueryPerformanceCounter(StartTime);
 
-    SortData(InFile, OutFile);
+    try
+      SortData(InFile, OutFile);
+    except
+      on E: EOutOfMemory do
+      begin
+        writeln('Out of memory');
+        Exit;
+      end
+      else
+        raise
+    end;
 
     QueryPerformanceCounter(EndTime);
 
