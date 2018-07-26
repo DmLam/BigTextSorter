@@ -20,8 +20,8 @@ type
 implementation
 
 type
-  TIndexArray = array[0..0] of integer;
-  PIndexArray = ^TIndexArray;
+  TUIntArray = array[0..100] of Cardinal;  // размер такой для удобства отладки
+  PUIntArray = ^TUIntArray;
 
 
 type
@@ -29,11 +29,13 @@ type
   private
     FData, FDataEnd: PAnsiChar;
     FDataSize: integer;
-    FIndexes: PIndexArray; // массив смещений строк от начала буфера. храним не в виде указателей, а в виде смещений, т.к. при необходимости
+    FIndexes: PUIntArray; // массив смещений строк от начала буфера. храним не в виде указателей, а в виде смещений, т.к. при необходимости
                            // скомпилировать под x64 массив с указателями будет занимать в два раза больше памяти, которая у нас ограничена
+    FLengths: PUIntArray;
     FIndexesSize: integer;
     FLineCount: integer;
     FCurLineIndex: integer;
+    FLastCRLFAdded: boolean; // признак того, что к последней строке был добавлен CRLF, т.к. в исходном файле его не было
 
     procedure QuickSort(L, R: Integer);
     function GetCurLine: PAnsiChar;
@@ -62,10 +64,12 @@ begin
   FData := Data;
   FDataSize := DataSize;
   FCurLineIndex := 0;
+  FLastCRLFAdded := false;
 end;
 
 destructor TPieceSorter.Destroy;
 begin
+  FreeMem(FLengths);
   FreeMem(FIndexes);
 
   inherited;
@@ -81,7 +85,8 @@ end;
 
 procedure TPieceSorter.QuickSort(L, R: Integer);
 var
-  I, J, P, Save: Integer;
+  I, J, P: Integer;
+  Save: Cardinal;
 begin
   repeat
     I := L;
@@ -97,6 +102,9 @@ begin
         Save := FIndexes[I];
         FIndexes[I] := FIndexes[J];
         FIndexes[J] := Save;
+        Save := FLengths[I];
+        FLengths[I] := FLengths[J];
+        FLengths[J] := Save;
         if P = I then
           P := J
         else
@@ -113,16 +121,16 @@ end;
 
 procedure TPieceSorter.SaveCurLine(const Stream: TStream);
 var
-  Ptr, LineStart: PAnsiChar;
+  Ptr: PAnsiChar;
+  L: Cardinal;
 begin
   Ptr := FData + FIndexes[FCurLineIndex];
-  LineStart := Ptr;
-  while (Ptr < FDataEnd) and (PWord(Ptr)^ <> CRLF) do
-    Inc(Ptr);
-  if Ptr < FDataEnd then
-    Inc(Ptr, 2);  // CRLF
-  Stream.WriteBuffer(LineStart^, Ptr - LineStart);
+  L := FLengths[FCurLineIndex];
   Inc(FCurLineIndex);
+  if (FCurLineIndex >= FLineCount) and FLastCRLFAdded then
+    // после последней строки не было CRLF, поэтому удалим его и здесь
+    Dec(L, 2);
+  Stream.WriteBuffer(Ptr^, L);
 end;
 
 procedure TPieceSorter.Execute;
@@ -136,11 +144,11 @@ begin
     IndexBlockSize := 100;
   FIndexesSize := IndexBlockSize;
   GetMem(FIndexes, FIndexesSize);
+  GetMem(FLengths, FIndexesSize);
 
   // подготовим массив FIndexes со смещениями каждой строки от начала буфера
   // Поскольку количество строк заранее не известно, то память под массив выделяем порциями по IndexBlockSize байт
-  // Можно еще немного ускорить дальнейшийпроцесс сохранения строк в файл если на этом этапе хранить не только
-  // начала строк, но и их размеры
+  // Также подготавливаем аналогичный массив с длинами строк чтобы потом при записи их не искать
   FDataEnd := FData + FDataSize;
   Ptr := FData;
   FLineCount := 0;
@@ -149,18 +157,27 @@ begin
     LineStart := Ptr;
     while (Ptr < FDataEnd) and (PWord(Ptr)^ <> CRLF) do
       Inc(Ptr);
-    if Ptr < FDataEnd then
-    begin
-      if FLineCount * SizeOf(integer) >= FIndexesSize then
-      begin
-        Inc(FIndexesSize, IndexBlockSize);
-        ReallocMem(FIndexes, FIndexesSize);
-      end;
-      FIndexes[FLineCount] := LineStart - FData;
-      Inc(FLineCount);
 
-      Inc(Ptr, 2);
+    if Ptr = FDataEnd then
+    begin
+      // дошли до конца буфера и там не было CRLF - добавим его и запомним этот факт, чтобы потом удалить
+      // Добавлять можно, т.к. в UnitSplitter мы выделяли под буффер два лишних байта
+      PWord(FDataEnd)^ := CRLF;
+      FLastCRLFAdded := true;
     end;
+    // сдвинем указатель на два символа CR и ДА
+    Inc(Ptr, 2);
+
+    // увеличим размер массивов индексов и длин строк если надо
+    if FLineCount * SizeOf(Cardinal) >= FIndexesSize then
+    begin
+      Inc(FIndexesSize, IndexBlockSize);
+      ReallocMem(FIndexes, FIndexesSize);
+      ReallocMem(FLengths, FIndexesSize);
+    end;
+    FIndexes[FLineCount] := LineStart - FData;
+    FLengths[FLineCount] := Ptr - LineStart;
+    Inc(FLineCount);
   end;
 
   // Сортируем строки обычным QuickSort-ом. Реально сортируются смещения в массиве

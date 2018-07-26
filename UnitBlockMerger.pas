@@ -15,9 +15,10 @@ type
         FFileName: string;
         FBuffer: PAnsiChar;
         FCurPtr: PAnsiChar;
-        FBufferEnd: PAnsiChar;  // указатель на конец последней полной строки в буффере (точнее, начало следующей - не до конца поместившейся
+        FBufferEnd: PAnsiChar;  // указатель на конец последней полной строки в буффере (точнее, начало следующей, поместившейся не до конца)
         FStream: TStream;
         BytesInBuffer: integer;
+        FLastCRLFAdded: boolean;
 
         procedure SetCurPtr(const Value: PAnsiChar);
         procedure ReadBlockFromFile;
@@ -26,6 +27,7 @@ type
         procedure Destroy;
 
         function IsEmpty: boolean;
+        procedure WriteLine(const Stream: TStream; const Line, LineEnd: PAnsiChar);
         procedure CopyTo(const Destination: TStream);
         procedure CheckPtr(var Ptr: PAnsiChar); // проверяет, что указатель не вышел за границу буфера - на случай добавленного в конце последней строки CRLF
 
@@ -73,6 +75,7 @@ begin
   end;
   GetMem(FBuffer, MergeBufferSize + 2);  // 2 байта для CRLF, которого может не быть после последней строки в файле
   BytesInBuffer := 0;
+  FLastCRLFAdded := false;
   ReadBlockFromFile;
 end;
 
@@ -129,7 +132,18 @@ begin
       Inc(FBufferEnd, 2)
   end
   else
+  begin
+    // файл уже был прочитан до конца и в буффере больше ничего нет
     FBufferEnd := FBuffer + BufRestSize;
+    if BufRestSize > 0 then
+    begin
+      // Если в буфере что-то еще при этом оставалось, то значит была последняя строка без CRLF в конце
+      PWord(FBufferEnd)^ := CRLF;
+      Inc(FBufferEnd, 2);
+      BytesInBuffer := BufRestSize + 2;
+      FLastCRLFAdded := true;
+    end;
+  end;
 end;
 
 procedure TBlockMerger.TBuffer.SetCurPtr(const Value: PAnsiChar);
@@ -138,6 +152,16 @@ begin
     ReadBlockFromFile
   else
     FCurPtr := Value;
+end;
+
+procedure TBlockMerger.TBuffer.WriteLine(const Stream: TStream; const Line, LineEnd: PAnsiChar);
+var
+  L: integer;
+begin
+  L := LineEnd - Line;
+  if (LineEnd = FBufferEnd) and FLastCRLFAdded then
+    Dec(L, 2);
+  Stream.WriteBuffer(Line^, L);  
 end;
 
 { TBlockMerger }
@@ -167,13 +191,13 @@ begin
           if CompareStrings(Buffer1.CurPtr, Buffer2.CurPtr, NextStr1, NextStr2) <= 0 then
           begin
             Buffer1.CheckPtr(NextStr1);
-            RF.WriteBuffer(Buffer1.CurPtr^, NextStr1 - Buffer1.CurPtr);
+            Buffer1.WriteLine(RF, Buffer1.CurPtr, NextStr1);
             Buffer1.CurPtr := NextStr1;
           end
           else
           begin
             Buffer2.CheckPtr(NextStr2);
-            RF.WriteBuffer(Buffer2.CurPtr^, NextStr2 - Buffer2.CurPtr);
+            Buffer2.WriteLine(RF, Buffer2.CurPtr, NextStr2);
             Buffer2.CurPtr := NextStr2;
           end;
         end;
