@@ -15,9 +15,10 @@ type
         FFileName: string;
         FBuffer: PAnsiChar;
         FCurPtr: PAnsiChar;
-        FBufferEnd: PAnsiChar;  // указатель на конец последней полной строки в буффере (точнее, начало следующей - не до конца поместившейся
+        FBufferEnd: PAnsiChar;  // указатель на конец последней полной строки в буффере (точнее, начало следующей, поместившейся не до конца)
         FStream: TStream;
         BytesInBuffer: integer;
+        FLastCRLFAdded: boolean;
 
         procedure SetCurPtr(const Value: PAnsiChar);
         procedure ReadBlockFromFile;
@@ -26,11 +27,14 @@ type
         procedure Destroy;
 
         function IsEmpty: boolean;
-        procedure CopyTo(const Destination: TStream);
+        procedure WriteLine(const Stream: TStream; const Line, LineEnd: PAnsiChar);
+        procedure CopyTo(const Destination: TStream; const ExcludeLastCRLF: boolean);
         procedure CheckPtr(var Ptr: PAnsiChar); // проверяет, что указатель не вышел за границу буфера - на случай добавленного в конце последней строки CRLF
 
         property CurPtr: PAnsiChar
           read FCurPtr write SetCurPtr;
+        property LastCRLFAdded: boolean
+          read FLastCRLFAdded;
       end;
   public
     constructor Create(const BlockIndex: integer; const FileName1, FileName2, ResultFileName: string);
@@ -50,9 +54,10 @@ begin
     Ptr := FBufferEnd;
 end;
 
-procedure TBlockMergerThread.TBuffer.CopyTo(const Destination: TStream);
+procedure TBlockMergerThread.TBuffer.CopyTo(const Destination: TStream; const ExcludeLastCRLF: boolean);
 begin
-  // записываем остаток буфера и остаток файла в поток назначения
+  if ExcludeLastCRLF then
+    Dec(BytesInBuffer, 2);
   Destination.WriteBuffer(FCurPtr^, FBuffer + BytesInBuffer - FCurPtr);
   if FStream.Size <> FStream.Position then
     Destination.CopyFrom(FStream, FStream.Size - FStream.Position);
@@ -73,6 +78,7 @@ begin
   end;
   GetMem(FBuffer, MergeBufferSize + 2);  // 2 байта для CRLF, которого может не быть после последней строки в файле
   BytesInBuffer := 0;
+  FLastCRLFAdded := false;
   ReadBlockFromFile;
 end;
 
@@ -129,7 +135,18 @@ begin
       Inc(FBufferEnd, 2)
   end
   else
+  begin
+    // файл уже был прочитан до конца и в буффере больше ничего нет
     FBufferEnd := FBuffer + BufRestSize;
+    if BufRestSize > 0 then
+    begin
+      // Если в буфере что-то еще при этом оставалось, то значит была последняя строка без CRLF в конце
+      PWord(FBufferEnd)^ := CRLF;
+      Inc(FBufferEnd, 2);
+      BytesInBuffer := BufRestSize + 2;
+      FLastCRLFAdded := true;
+    end;
+  end;
 end;
 
 procedure TBlockMergerThread.TBuffer.SetCurPtr(const Value: PAnsiChar);
@@ -138,6 +155,11 @@ begin
     ReadBlockFromFile
   else
     FCurPtr := Value;
+end;
+
+procedure TBlockMergerThread.TBuffer.WriteLine(const Stream: TStream; const Line, LineEnd: PAnsiChar);
+begin
+  Stream.WriteBuffer(Line^, LineEnd - Line);
 end;
 
 { TBlockMerger }
@@ -167,21 +189,21 @@ begin
           if CompareStrings(Buffer1.CurPtr, Buffer2.CurPtr, NextStr1, NextStr2) <= 0 then
           begin
             Buffer1.CheckPtr(NextStr1);
-            RF.WriteBuffer(Buffer1.CurPtr^, NextStr1 - Buffer1.CurPtr);
+            Buffer1.WriteLine(RF, Buffer1.CurPtr, NextStr1);
             Buffer1.CurPtr := NextStr1;
           end
           else
           begin
             Buffer2.CheckPtr(NextStr2);
-            RF.WriteBuffer(Buffer2.CurPtr^, NextStr2 - Buffer2.CurPtr);
+            Buffer2.WriteLine(RF, Buffer2.CurPtr, NextStr2);
             Buffer2.CurPtr := NextStr2;
           end;
         end;
         // дописать остатки второго потока
         if Buffer1.IsEmpty then
-          Buffer2.CopyTo(RF)
+          Buffer2.CopyTo(RF, Buffer1.LastCRLFAdded or Buffer2.LastCRLFAdded)
         else
-          Buffer1.CopyTo(RF);
+          Buffer1.CopyTo(RF, Buffer1.LastCRLFAdded or Buffer2.LastCRLFAdded);
       finally
         RF.Free;
       end;

@@ -77,9 +77,11 @@ var
   FS: TStream;
   i: integer;
   IndexBlockSize: integer;
+  LastCRLFAdded: boolean;
 begin
   IndexesSize := 0;
   IndexBlockSize := MergeBufferSize div (MAX_LINE_LENGTH div 2) * SizeOf(Integer);  // приращение размера массива индексов выберем как среднее количество строк, помещающееся в буфер
+  LastCRLFAdded := false;
 
   FIndexes := nil;
   try
@@ -94,18 +96,26 @@ begin
         LineStart := Ptr;
         while (Ptr < DataEnd) and (PWord(Ptr)^ <> CRLF) do
           Inc(Ptr);
-        if Ptr < DataEnd then
-        begin
-          if LineCount * SizeOf(integer) >= IndexesSize then
-          begin
-            Inc(IndexesSize, IndexBlockSize);
-            ReallocMem(FIndexes, IndexesSize);
-          end;
-          FIndexes[LineCount] := LineStart - FData;
-          Inc(LineCount);
 
-          Inc(Ptr, 2);
+        if Ptr = DataEnd then
+        begin
+          // дошли до конца буфера и там не было CRLF - добавим его и запомним этот факт, чтобы потом удалить
+          // Добавлять можно, т.к. в UnitSplitter мы выделяли под буффер два лишних байта
+          PWord(DataEnd)^ := CRLF;
+          Inc(DataEnd, 2);
+          LastCRLFAdded := true;
         end;
+        // сдвинем указатель на два символа CR и ДА
+        Inc(Ptr, 2);
+
+        // увеличим размер массивов индексов и длин строк если надо
+        if LineCount * SizeOf(integer) >= IndexesSize then
+        begin
+          Inc(IndexesSize, IndexBlockSize);
+          ReallocMem(FIndexes, IndexesSize);
+        end;
+        FIndexes[LineCount] := LineStart - FData;
+        Inc(LineCount);
       end;
 
       // Сортируем строки обычным QuickSort-ом. Реально сортируются смещения в массиве
@@ -128,8 +138,10 @@ begin
           LineStart := Ptr;
           while (Ptr < DataEnd) and (PWord(Ptr)^ <> CRLF) do
             Inc(Ptr);
-          if Ptr < DataEnd then
+          // Если это была последняя строка и был добавлен CRLF - его писать не надо
+          if (i < LineCount - 1) or not LastCRLFAdded then
             Inc(Ptr, 2);  // CRLF
+
           FS.WriteBuffer(LineStart^, Ptr - LineStart);
         end;
       finally

@@ -47,7 +47,7 @@ begin
     Block := nil;
     BlockSize := 0;
 
-    GetMem(Buf, SortBufferSize);
+    GetMem(Buf, SortBufferSize + 2);  // два байта на случай отсутстви€ CRLF после последней строки
     try
       BufStart := Buf;
       BlockRestSize := 0; // размер начала строки, неполностью считавшейс€ в буфер на предыдущем проходе
@@ -59,16 +59,22 @@ begin
           begin
             BufEnd := Buf + ReadCnt;
             // Ќайдем окончание последней строки в блоке
-            LastChar := FindLastCRLF(Buf, BufEnd);
-            if LastChar = nil then
+            if ReadCnt < SortBufferSize then
+              LastChar := BufEnd                      // если только что прочитали остаток файла, то его конец и есть окончание последней строки
+            else
             begin
-              // если в буфере не нашли перевода строки значит в файле есть слишком длинна€ строка, не влезающа€ в буфер
-              writeln('Line too long!');
-              Error := true;
-              Break;
+              LastChar := FindLastCRLF(Buf, BufEnd);
+              if LastChar = nil then
+              begin
+                // если в буфере не нашли перевода строки значит в файле есть слишком длинна€ строка, не влезающа€ в буфер
+                writeln('Line too long!');
+                Error := true;
+                Break;
+              end;
+              
+              // подготовим блок дл€ сортировки - возьмем туда все до последнего перевода строки
+              Inc(LastChar, 2);  // CRLF
             end;
-            // подготовим блок дл€ сортировки - возьмем туда все до последнего перевода строки
-            Inc(LastChar, 2);  // CRLF
             BlockSize := LastChar - Buf;
             GetMem(Block, BlockSize);
             Move(Buf^, Block^, BlockSize);

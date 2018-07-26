@@ -10,10 +10,9 @@
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <Version>7.0</Version>
-    <DCC_DebugInformation>False</DCC_DebugInformation>
-    <DCC_LocalDebugSymbols>False</DCC_LocalDebugSymbols>
     <DCC_SymbolReferenceInfo>0</DCC_SymbolReferenceInfo>
     <DCC_Define>RELEASE</DCC_Define>
+    <DCC_Optimize>False</DCC_Optimize>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <Version>7.0</Version>
@@ -40,6 +39,7 @@
     <DCCReference Include="UnitSorter.pas" />
     <DCCReference Include="UnitSplitter.pas" />
     <DCCReference Include="UnitThreadManager.pas" />
+    <DCCReference Include="UnitWorker.pas" />
     <None Include="Sorter.todo" />
   </ItemGroup>
 </Project>
